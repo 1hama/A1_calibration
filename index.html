@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>PyScript データ解析ツール</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        .table { border-collapse: collapse; max-width: 400px; margin-bottom: 20px;}
+        .table th, .table td { border: 1px solid #ddd; padding: 8px; text-align: right; }
+        .table th { background-color: #f2f2f2; text-align: center; }
+        .controls { margin-bottom: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .controls-row { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+        
+        /* ローディング用スピナーのスタイル */
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <!-- ローディング画面のオーバーレイ -->
+    <div id="loading-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.7); z-index: 9999; justify-content: center; align-items: center; flex-direction: column;">
+        <div style="border: 8px solid #f3f3f3; border-top: 8px solid #3498db; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite;"></div>
+        <h2 style="color: #333; margin-top: 20px;">処理中...</h2>
+    </div>
+
+    <h1>データ解析・可視化ツール</h1>
+    
+    <details style="margin-bottom: 20px;">
+        <summary style="color: red; font-weight: bold; cursor: pointer; font-size: 1.1em;">対応しているデータ形式（クリックで表示）</summary>
+        <div style="background-color: #f9f9f9; padding: 15px; border: 1px solid #ccc; margin-top: 10px; display: flex; gap: 40px; border-radius: 5px;">
+            <div>
+                <h4 style="margin-top: 0;">1列のデータ例</h4>
+                <pre style="margin: 0; font-family: monospace; background: #fff; padding: 10px; border: 1px solid #eee;">254
+1204
+3021
+405
+1150
+842
+2901
+502
+199
+2014</pre>
+            </div>
+            <div>
+                <h4 style="margin-top: 0;">2列のデータ例</h4>
+                <pre style="margin: 0; font-family: monospace; background: #fff; padding: 10px; border: 1px solid #eee;">254     511
+1204    102
+3021    2094
+405     18
+1150    901
+842     129
+2901    3045
+502     11
+199     300
+2014    512</pre>
+            </div>
+        </div>
+    </details>
+
+    <p>シンチレータに対応するデータたちのテキストファイル（空白またはタブ区切り、例: LaBr3_cal.dat.txt）を選択．選択例：「NaIのデータを2つ（22Na_NaI_cal.dat.txtと137Cs_NaI_cal.dat.txt）」</p>
+    
+    <div class="controls">
+        <div class="controls-row">
+            <div>
+                <input type="file" id="file-upload" accept=".txt,.csv,.dat" multiple py-change="read_file">
+            </div>
+            <div>
+                <label>検出器 (デフォルト設定用): 
+                    <select id="detector-dropdown" py-change="change_detector_dropdown">
+                        <option value="nai">NaI</option>
+                        <option value="labr3">LaBr3</option>
+                    </select>
+                </label>
+            </div>
+            <div>
+                <label>全体のBin数: <input type="number" id="bins-input" value="100" min="1" py-change="update_bins" style="width: 70px;"></label>
+            </div>
+        </div>
+    </div>
+
+    <hr>
+
+    <div id="column-selection-area" style="display: none;">
+        <h2>列の選択とファイル別設定</h2>
+        <p>ファイルごとのデータ全体のヒストグラム（全列を重ね合わせ）です。列の選択や、ピーク探索範囲の微調整が可能です。</p>
+        <div id="column-graphs"></div>
+        <div id="radio-container" style="margin-top: 15px; display: flex; flex-direction: column; gap: 15px;">
+            <!-- File 1 -->
+            <div id="file1-radios" style="display: none; background: #f9f9f9; padding: 10px; border-radius: 5px;">
+                <div style="font-weight:bold; margin-bottom: 5px;"><span id="file1-name">File 1</span></div>
+                <div style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
+                    <div>
+                        <label id="lbl-col0-f1"><input type="radio" name="col_select_1" value="0" py-change="select_column"> 列 1</label>
+                        <label id="lbl-col1-f1"><input type="radio" name="col_select_1" value="1" py-change="select_column"> 列 2</label>
+                    </div>
+                    <div>
+                        <label><input type="checkbox" id="na22-checkbox-1" value="0" py-change="toggle_na22_file"> Na22</label>
+                    </div>
+                    <div style="font-size: 0.9em;">
+                        Peak1: <input type="number" id="smin-1-1" value="400" style="width: 65px;" py-change="update_bins"> - <input type="number" id="smax-1-1" value="2800" style="width: 65px;" py-change="update_bins">
+                    </div>
+                    <div id="peak2-params-1" style="display:none; font-size: 0.9em;">
+                        Peak2: <input type="number" id="smin-2-1" value="2800" style="width: 65px;" py-change="update_bins"> - <input type="number" id="smax-2-1" value="3300" style="width: 65px;" py-change="update_bins">
+                    </div>
+                </div>
+            </div>
+            <!-- File 2 -->
+            <div id="file2-radios" style="display: none; background: #f9f9f9; padding: 10px; border-radius: 5px;">
+                <div style="font-weight:bold; margin-bottom: 5px;"><span id="file2-name">File 2</span></div>
+                <div style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
+                    <div>
+                        <label id="lbl-col0-f2"><input type="radio" name="col_select_2" value="0" py-change="select_column"> 列 1</label>
+                        <label id="lbl-col1-f2"><input type="radio" name="col_select_2" value="1" py-change="select_column"> 列 2</label>
+                    </div>
+                    <div>
+                        <label><input type="checkbox" id="na22-checkbox-2" value="1" py-change="toggle_na22_file"> Na22</label>
+                    </div>
+                    <div style="font-size: 0.9em;">
+                        Peak1: <input type="number" id="smin-1-2" value="400" style="width: 65px;" py-change="update_bins"> - <input type="number" id="smax-1-2" value="2800" style="width: 65px;" py-change="update_bins">
+                    </div>
+                    <div id="peak2-params-2" style="display:none; font-size: 0.9em;">
+                        Peak2: <input type="number" id="smin-2-2" value="2800" style="width: 65px;" py-change="update_bins"> - <input type="number" id="smax-2-2" value="3300" style="width: 65px;" py-change="update_bins">
+                    </div>
+                </div>
+            </div>
+            <!-- File 3 -->
+            <div id="file3-radios" style="display: none; background: #f9f9f9; padding: 10px; border-radius: 5px;">
+                <div style="font-weight:bold; margin-bottom: 5px;"><span id="file3-name">File 3</span></div>
+                <div style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
+                    <div>
+                        <label id="lbl-col0-f3"><input type="radio" name="col_select_3" value="0" py-change="select_column"> 列 1</label>
+                        <label id="lbl-col1-f3"><input type="radio" name="col_select_3" value="1" py-change="select_column"> 列 2</label>
+                    </div>
+                    <div>
+                        <label><input type="checkbox" id="na22-checkbox-3" value="2" py-change="toggle_na22_file"> Na22</label>
+                    </div>
+                    <div style="font-size: 0.9em;">
+                        Peak1: <input type="number" id="smin-1-3" value="400" style="width: 65px;" py-change="update_bins"> - <input type="number" id="smax-1-3" value="2800" style="width: 65px;" py-change="update_bins">
+                    </div>
+                    <div id="peak2-params-3" style="display:none; font-size: 0.9em;">
+                        Peak2: <input type="number" id="smin-2-3" value="2800" style="width: 65px;" py-change="update_bins"> - <input type="number" id="smax-2-3" value="3300" style="width: 65px;" py-change="update_bins">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <hr>
+    </div>
+
+    <div id="analysis-area" style="display: none;">
+        <h2>可視化グラフ（フィッティング結果）</h2>
+        <div id="graph-area"></div>
+
+        <div id="calibration-area" style="display: none;">
+            <hr>
+            <h2>エネルギー較正（線形フィッティング）</h2>
+            <p>解析で得られたすべてのピークの &mu; と誤差を用いて線形フィッティングを行います。</p>
+            <div style="margin-bottom: 10px;">
+                <label>kev (カンマ区切り): <input type="text" id="kev-calib-input" value="1506.7, 1946.2, 3712.4" style="width: 250px;" py-change="draw_calibration_graph"></label>
+                <button py-click="draw_calibration_graph">較正を実行</button>
+            </div>
+            <div id="calib-result-text" style="font-family: monospace; white-space: pre; margin-bottom: 10px;"></div>
+            <div id="calib-graph-area"></div>
+        </div>
+        
+        <hr>
+        <h2>データ要約</h2>
+        <div id="data-summary" style="display: flex; flex-wrap: wrap; gap: 20px;"></div>
+    </div>
+
+    <script type="py" config='{"packages": ["pandas", "matplotlib", "numpy", "scipy"]}'>
+        import asyncio
+        import io
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from scipy.optimize import curve_fit
+        from scipy.special import erf
+        from pyscript import document, display
+        from js import FileReader
+
+        SQRT2 = np.sqrt(2.0)
+        FIT_HALF_WIDTH = 180.0
+        ADC_MIN = 0.0
+        ADC_MAX = 4096.0
+        BIN_WIDTH = 16.0
+
+        uploaded_files_data = []
+        fitted_peaks = []
+
+        # ==========================================
+        # UI Helpers
+        # ==========================================
+        def show_loading():
+            document.getElementById("loading-overlay").style.display = "flex"
+
+        def hide_loading():
+            document.getElementById("loading-overlay").style.display = "none"
+
+        def apply_defaults_to_file(file_idx, detector, is_na22):
+            if detector == "labr3":
+                if is_na22:
+                    document.getElementById(f"smin-1-{file_idx+1}").value = 400
+                    document.getElementById(f"smax-1-{file_idx+1}").value = 3500
+                    document.getElementById(f"smin-2-{file_idx+1}").value = 3500
+                    document.getElementById(f"smax-2-{file_idx+1}").value = 4000
+                else:
+                    document.getElementById(f"smin-1-{file_idx+1}").value = 400
+                    document.getElementById(f"smax-1-{file_idx+1}").value = 3900
+            else: # nai
+                if is_na22:
+                    document.getElementById(f"smin-1-{file_idx+1}").value = 400
+                    document.getElementById(f"smax-1-{file_idx+1}").value = 2800
+                    document.getElementById(f"smin-2-{file_idx+1}").value = 2800
+                    document.getElementById(f"smax-2-{file_idx+1}").value = 3300
+                else:
+                    document.getElementById(f"smin-1-{file_idx+1}").value = 400
+                    document.getElementById(f"smax-1-{file_idx+1}").value = 2800
+
+        async def change_detector_dropdown(event):
+            show_loading()
+            await asyncio.sleep(0.01)
+            
+            detector = document.getElementById("detector-dropdown").value
+            for i in range(len(uploaded_files_data)):
+                is_na22 = uploaded_files_data[i].get("is_na22", False)
+                apply_defaults_to_file(i, detector, is_na22)
+            
+            draw_analysis_graph()
+            hide_loading()
+
+        # ==========================================
+        # Photopeak Fitting Algorithms (from Na22NaI.py)
+        # ==========================================
+        def make_histogram(
+            values: np.ndarray,
+            *,
+            bin_width: float,
+            adc_min: float,
+            adc_max: float,
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            edges = np.arange(adc_min, adc_max + bin_width, bin_width)
+            counts, edges = np.histogram(values, bins=edges)
+            centers = 0.5 * (edges[:-1] + edges[1:])
+            return counts.astype(float), edges.astype(float), centers
+
+        def gaussian_bin_integral(
+            x_edges: np.ndarray,
+            area: float,
+            center: float,
+            sigma: float,
+            background: float,
+            slope: float,
+            x_ref: float,
+        ) -> np.ndarray:
+            left, right = x_edges
+            centers = 0.5 * (left + right)
+            z_left = (left - center) / (SQRT2 * sigma)
+            z_right = (right - center) / (SQRT2 * sigma)
+            peak = 0.5 * area * (erf(z_right) - erf(z_left))
+            baseline = background + slope * (centers - x_ref)
+            return peak + baseline
+
+        def guess_initial_parameters(
+            counts: np.ndarray,
+            edges: np.ndarray,
+            centers: np.ndarray,
+            peak_guess: float,
+        ) -> tuple[float, float, float, float, float]:
+            edge_bins = max(2, len(counts) // 6)
+            left_level = np.median(counts[:edge_bins])
+            right_level = np.median(counts[-edge_bins:])
+            x_ref = peak_guess
+
+            left_x = np.mean(centers[:edge_bins])
+            right_x = np.mean(centers[-edge_bins:])
+            slope = (right_level - left_level) / max(right_x - left_x, 1.0)
+            background = max(0.5 * (left_level + right_level), 0.0)
+
+            baseline = background + slope * (centers - x_ref)
+            signal = np.clip(counts - baseline, 0.0, None)
+            if signal.sum() > 0:
+                center = np.average(centers, weights=signal)
+                variance = np.average((centers - center) ** 2, weights=signal)
+                area = signal.sum()
+            else:
+                center = peak_guess
+                variance = (0.15 * (centers[-1] - centers[0])) ** 2
+                area = max(counts.sum() - background * len(counts), counts.max())
+
+            bin_width = np.median(np.diff(edges))
+            sigma = np.sqrt(max(variance, (1.5 * bin_width) ** 2))
+            sigma = min(sigma, 0.5 * (edges[-1] - edges[0]))
+            return area, center, sigma, background, slope
+
+        def fit_photopeak(
+            counts: np.ndarray,
+            edges: np.ndarray,
+            centers: np.ndarray,
+            *,
+            search_min: float,
+            search_max: float,
+            fit_half_width: float,
+        ) -> dict:
+            search_mask = (centers >= search_min) & (centers <= search_max)
+            if not np.any(search_mask):
+                raise ValueError("no histogram bins are inside the peak search range")
+
+            search_indices = np.flatnonzero(search_mask)
+            peak_index = search_indices[np.argmax(counts[search_mask])]
+            peak_guess = centers[peak_index]
+
+            fit_mask = (
+                (centers >= peak_guess - fit_half_width)
+                & (centers <= peak_guess + fit_half_width)
+            )
+            if fit_mask.sum() < 8:
+                raise ValueError("fit range is too narrow; increase --fit-half-width")
+
+            y = counts[fit_mask]
+            left = edges[:-1][fit_mask]
+            right = edges[1:][fit_mask]
+            x = centers[fit_mask]
+            x_edges = np.vstack([left, right])
+            yerr = np.sqrt(np.maximum(y, 1.0))
+            x_ref = peak_guess
+
+            p0 = guess_initial_parameters(y, np.r_[left, right[-1]], x, peak_guess)
+
+            def model(x_edges_: np.ndarray, area: float, center: float, sigma: float,
+                      background: float, slope: float) -> np.ndarray:
+                return gaussian_bin_integral(
+                    x_edges_, area, center, sigma, background, slope, x_ref
+                )
+
+            lower = [0.0, left[0], 0.5 * np.median(np.diff(edges)), 0.0, -np.inf]
+            upper = [np.inf, right[-1], fit_half_width, np.inf, np.inf]
+            popt, pcov = curve_fit(
+                model,
+                x_edges,
+                y,
+                p0=p0,
+                sigma=yerr,
+                absolute_sigma=True,
+                bounds=(lower, upper),
+                maxfev=20000,
+            )
+
+            expected = model(x_edges, *popt)
+            chi2 = float(np.sum(((y - expected) / yerr) ** 2))
+            ndf = int(len(y) - len(popt))
+            return {
+                "popt": popt,
+                "pcov": pcov,
+                "peak_guess": float(peak_guess),
+                "fit_mask": fit_mask,
+                "x_edges": x_edges,
+                "x": x,
+                "y": y,
+                "yerr": yerr,
+                "expected": expected,
+                "chi2": chi2,
+                "ndf": ndf,
+                "x_ref": float(x_ref),
+            }
+        # ==========================================
+
+
+        def get_input_val(eid, default_val):
+            try:
+                return float(document.getElementById(eid).value)
+            except:
+                return default_val
+
+        async def toggle_na22_file(event):
+            show_loading()
+            await asyncio.sleep(0.01)
+            
+            file_idx = int(event.target.value)
+            if file_idx < len(uploaded_files_data):
+                is_na22 = event.target.checked
+                uploaded_files_data[file_idx]["is_na22"] = is_na22
+                
+                # Na22のオンオフが変わったのでデフォルト値を再適用
+                detector = document.getElementById("detector-dropdown").value
+                apply_defaults_to_file(file_idx, detector, is_na22)
+                
+                if is_na22:
+                    document.getElementById(f"peak2-params-{file_idx+1}").style.display = "block"
+                else:
+                    document.getElementById(f"peak2-params-{file_idx+1}").style.display = "none"
+                
+            draw_analysis_graph()
+            hide_loading()
+
+        def draw_selection_graphs():
+            global uploaded_files_data
+            if not uploaded_files_data:
+                return
+            b = int(get_input_val("bins-input", 100))
+            plt.close('all')
+            
+            n = len(uploaded_files_data)
+            fig, axes = plt.subplots(1, n, figsize=(6 * n, 4), squeeze=False)
+            axes = axes[0]
+            
+            for i, data in enumerate(uploaded_files_data):
+                df = data["df"]
+                ax = axes[i]
+                for col in df.columns:
+                    df[col].plot.hist(bins=max(1, b), ax=ax, alpha=0.5, label=f"Column {col+1}")
+                ax.set_title(data["name"])
+                ax.legend()
+            
+            plt.tight_layout()
+            document.getElementById("column-graphs").innerHTML = ""
+            display(fig, target="column-graphs")
+
+        def _plot_peak_on_ax(ax, counts, edges, centers, smin, smax, title):
+            global fitted_peaks
+            bin_width = BIN_WIDTH
+            
+            ax.bar(
+                centers,
+                counts,
+                width=bin_width,
+                align="center",
+                color="#7aa6c2",
+                edgecolor="#335f7a",
+                linewidth=0.35,
+                alpha=0.65,
+                label="histogram",
+            )
+
+            try:
+                fit_result = fit_photopeak(
+                    counts,
+                    edges,
+                    centers,
+                    search_min=smin,
+                    search_max=smax,
+                    fit_half_width=FIT_HALF_WIDTH,
+                )
+                
+                popt = np.asarray(fit_result["popt"])
+                pcov = np.asarray(fit_result["pcov"])
+                perr = np.sqrt(np.diag(pcov))
+                fit_mask = np.asarray(fit_result["fit_mask"], dtype=bool)
+                x_ref = float(fit_result["x_ref"])
+
+                ax.errorbar(
+                    centers[fit_mask],
+                    counts[fit_mask],
+                    yerr=np.sqrt(np.maximum(counts[fit_mask], 1.0)),
+                    fmt="o",
+                    ms=3.0,
+                    color="#1f2933",
+                    ecolor="#1f2933",
+                    elinewidth=0.7,
+                    capsize=1.5,
+                    label="fit bins",
+                )
+
+                x_plot = np.linspace(edges[:-1][fit_mask][0], edges[1:][fit_mask][-1], 500)
+                x_edges_plot = np.vstack([x_plot - 0.5 * bin_width, x_plot + 0.5 * bin_width])
+                y_plot = gaussian_bin_integral(x_edges_plot, *popt, x_ref=x_ref)
+                ax.plot(x_plot, y_plot, color="#b3261e", lw=2.0, label="bin-integrated fit")
+
+                _area, center, sigma, _background, _slope = popt
+                center_err = perr[1]
+                sigma_err = perr[2]
+                chi2 = float(fit_result["chi2"])
+                ndf = int(fit_result["ndf"])
+                annotation = (
+                    rf"$\mu = {center:.1f} \pm {center_err:.1f}$ ch" "\n"
+                    rf"$\sigma = {sigma:.1f} \pm {sigma_err:.1f}$ ch" "\n"
+                    rf"$\chi^2/\mathrm{{ndf}} = {chi2:.1f}/{ndf}$"
+                )
+                ax.text(
+                    0.97,
+                    0.96,
+                    annotation,
+                    transform=ax.transAxes,
+                    ha="right",
+                    va="top",
+                    fontsize=9,
+                    bbox={"boxstyle": "round,pad=0.35", "fc": "white", "ec": "#b8c2cc"},
+                )
+                
+                ax.set_xlim(edges[:-1][fit_mask][0] - 3 * bin_width, edges[1:][fit_mask][-1] + 3 * bin_width)
+                
+                # 縦軸をいい感じに調節
+                y_max = max(np.max(counts[fit_mask]), np.max(y_plot))
+                ax.set_ylim(0, y_max * 1.35)
+                
+                # 線形フィッティング用（エネルギー較正用）に結果を保存
+                fitted_peaks.append((center, center_err))
+            except Exception as e:
+                print(f"Fit failed for {title}: {e}")
+                ax.set_xlim(smin, smax)
+                search_mask = (centers >= smin) & (centers <= smax)
+                if np.any(search_mask):
+                    ax.set_ylim(0, np.max(counts[search_mask]) * 1.1)
+                else:
+                    ax.set_ylim(bottom=0)
+            
+            ax.set_title(title)
+            ax.set_xlabel("ADC channel")
+            ax.set_ylabel(f"counts / {bin_width:g} ch")
+            ax.legend(loc="upper left", frameon=False)
+
+        def _do_calibration():
+            try:
+                kev_str = document.getElementById("kev-calib-input").value
+                kev_vals = [float(x.strip()) for x in kev_str.split(",") if x.strip()]
+                
+                if len(kev_vals) != len(fitted_peaks):
+                    document.getElementById("calib-result-text").innerHTML = f"エラー: 指定されたkevの数 ({len(kev_vals)}) が、検出されたピークの数 ({len(fitted_peaks)}) と一致しません。\n（期待される数: {len(fitted_peaks)}）"
+                    document.getElementById("calib-graph-area").innerHTML = ""
+                    return
+                
+                # 大小関係を保ったまま対応させるためソート
+                kev_vals = sorted(kev_vals)
+                peaks_sorted = sorted(fitted_peaks, key=lambda x: x[0])
+                
+                energy_vals = [p[0] for p in peaks_sorted]
+                sigmas_vals = [p[1] for p in peaks_sorted]
+                
+                kev = np.array(kev_vals, dtype=float)
+                energy = np.array(energy_vals, dtype=float)
+                sigmas = np.array(sigmas_vals, dtype=float)
+                
+                def calib_model(x, a, b):
+                    return a * x + b
+                    
+                popt, pcov = curve_fit(calib_model, kev, energy, sigma=sigmas, absolute_sigma=True)
+                
+                a_fit = popt[0]
+                b_fit = popt[1]
+                sigma_a = np.sqrt(pcov[0, 0])
+                sigma_b = np.sqrt(pcov[1, 1])
+                
+                from scipy.stats import chi2 as chi2_dist
+                residuals = (energy - calib_model(kev, a_fit, b_fit)) / sigmas
+                chi2_min = np.sum(residuals**2)
+                ndf = max(1, len(energy) - 2)
+                p_val = chi2_dist.sf(chi2_min, df=ndf) if len(energy) > 2 else 0.0
+                
+                res_text = (
+                    f"a = {a_fit:.5f} +/- {sigma_a:.5f}\n"
+                    f"b = {b_fit:.5f} +/- {sigma_b:.5f}\n"
+                    f"chi2/ndf = {chi2_min:.2f} / {len(energy)-2 if len(energy)>2 else 0} = {chi2_min/ndf:.2f}\n"
+                    f"p-value = {p_val:.3f}"
+                )
+                document.getElementById("calib-result-text").innerHTML = res_text
+                
+                plt.close('all')
+                fig, ax = plt.subplots(figsize=(6, 4))
+                r_plot = np.linspace(kev.min() * 0.9, kev.max() * 1.1, 200)
+                ax.errorbar(kev, energy, yerr=sigmas, fmt='o', label='data')
+                ax.plot(r_plot, calib_model(r_plot, a_fit, b_fit), label=f'fit: a={a_fit:.1f} b={b_fit:.1f}')
+                ax.set_xlabel('kev')
+                ax.set_ylabel('energy')
+                ax.legend()
+                plt.tight_layout()
+                
+                document.getElementById("calib-graph-area").innerHTML = ""
+                display(fig, target="calib-graph-area")
+            except Exception as e:
+                document.getElementById("calib-result-text").innerHTML = f"エラーが発生しました: {e}"
+                document.getElementById("calib-graph-area").innerHTML = ""
+
+        async def draw_calibration_graph(event):
+            show_loading()
+            await asyncio.sleep(0.01)
+            _do_calibration()
+            hide_loading()
+
+        def draw_analysis_graph():
+            global uploaded_files_data, fitted_peaks
+            if not uploaded_files_data:
+                return
+                
+            fitted_peaks = []
+            
+            any_na22 = any(d.get("is_na22", False) for d in uploaded_files_data)
+            
+            n = len(uploaded_files_data)
+            rows = n
+            cols = 2 if any_na22 else 1
+            
+            plt.close('all')
+            fig, axes = plt.subplots(rows, cols, figsize=(7 * cols, 4 * rows), squeeze=False)
+            
+            for i, data in enumerate(uploaded_files_data):
+                col_idx = data["selected_col"]
+                is_na22 = data.get("is_na22", False)
+                df = data["df"]
+                values = df[col_idx].dropna().values
+                
+                # ファイルごとに設定されたパラメータを取得
+                smin = get_input_val(f"smin-1-{i+1}", 400.0)
+                smax = get_input_val(f"smax-1-{i+1}", 2800.0)
+                
+                counts, edges, centers = make_histogram(
+                    values,
+                    bin_width=BIN_WIDTH,
+                    adc_min=ADC_MIN,
+                    adc_max=ADC_MAX,
+                )
+                
+                title1 = f"{data['name']} - Col {col_idx+1}" + (" (Peak 1)" if is_na22 else "")
+                _plot_peak_on_ax(axes[i, 0], counts, edges, centers, smin, smax, title1)
+                
+                if cols == 2:
+                    if is_na22:
+                        smin2 = get_input_val(f"smin-2-{i+1}", 2800.0)
+                        smax2 = get_input_val(f"smax-2-{i+1}", 3300.0)
+                        title2 = f"{data['name']} - Col {col_idx+1} (Peak 2)"
+                        _plot_peak_on_ax(axes[i, 1], counts, edges, centers, smin2, smax2, title2)
+                    else:
+                        axes[i, 1].set_visible(False)
+            
+            plt.tight_layout()
+            document.getElementById("analysis-area").style.display = "block"
+            document.getElementById("graph-area").innerHTML = ""
+            display(fig, target="graph-area")
+            
+            if fitted_peaks:
+                document.getElementById("calibration-area").style.display = "block"
+                _do_calibration()
+            else:
+                document.getElementById("calibration-area").style.display = "none"
+            
+            # 要約データも各ファイルごとに表示
+            summary_html = ""
+            for data in uploaded_files_data:
+                col_idx = data["selected_col"]
+                series = data["df"][col_idx]
+                summary_html += f"<div><h3>{data['name']} (Col {col_idx+1})</h3>"
+                summary_html += series.describe().to_frame(name="Value").to_html(classes='table table-striped')
+                summary_html += "</div>"
+            document.getElementById("data-summary").innerHTML = summary_html
+
+        async def update_bins(event):
+            show_loading()
+            await asyncio.sleep(0.01)
+            draw_selection_graphs()
+            draw_analysis_graph()
+            hide_loading()
+
+        async def select_column(event):
+            show_loading()
+            await asyncio.sleep(0.01)
+            
+            name = event.target.name
+            col_idx = int(event.target.value)
+            file_idx = int(name.split("_")[-1]) - 1
+            
+            uploaded_files_data[file_idx]["selected_col"] = col_idx
+            draw_analysis_graph()
+            hide_loading()
+
+        async def read_file(event):
+            global uploaded_files_data
+            file_list = event.target.files
+            n_files = min(3, len(file_list))
+            if n_files == 0:
+                return
+
+            show_loading()
+            await asyncio.sleep(0.01)
+
+            uploaded_files_data = []
+
+            # ファイル名からデフォルトの検出器を自動判定（1つでもlabrがあればLaBr3）
+            detector_type = "nai"
+            for i in range(n_files):
+                fname = file_list.item(i).name.lower()
+                if "labr" in fname:
+                    detector_type = "labr3"
+            
+            document.getElementById("detector-dropdown").value = detector_type
+
+            for i in range(n_files):
+                file = file_list.item(i)
+                fname = file.name
+                
+                is_na22 = "22" in fname.lower()
+
+                reader = FileReader.new()
+                reader.readAsText(file)
+
+                while reader.readyState < 2:
+                    await asyncio.sleep(0.05)
+
+                text = reader.result
+                try:
+                    df = pd.read_csv(io.StringIO(text), sep=r'\s+', header=None)
+                    uploaded_files_data.append({
+                        "name": fname,
+                        "df": df,
+                        "selected_col": 0,
+                        "is_na22": is_na22
+                    })
+                except Exception as e:
+                    print(f"Failed to read {fname}: {e}")
+
+            if not uploaded_files_data:
+                hide_loading()
+                return
+
+            document.getElementById("column-selection-area").style.display = "block"
+            document.getElementById("column-graphs").innerHTML = ""
+            document.getElementById("graph-area").innerHTML = ""
+            document.getElementById("calibration-area").style.display = "none"
+
+            for i in range(3):
+                row_id = f"file{i+1}-radios"
+                if i < len(uploaded_files_data):
+                    data = uploaded_files_data[i]
+                    is_na22 = data["is_na22"]
+                    
+                    document.getElementById(row_id).style.display = "flex"
+                    document.getElementById(f"file{i+1}-name").innerHTML = data["name"]
+                    
+                    radios = document.getElementsByName(f"col_select_{i+1}")
+                    radios[0].checked = True
+                    if len(radios) > 1:
+                        radios[1].checked = False
+                    
+                    cb = document.getElementById(f"na22-checkbox-{i+1}")
+                    cb.checked = is_na22
+                    
+                    df = data["df"]
+                    if len(df.columns) == 1:
+                        document.getElementById(f"lbl-col1-f{i+1}").style.display = "none"
+                    else:
+                        document.getElementById(f"lbl-col1-f{i+1}").style.display = "inline"
+                        
+                    # 検出器とNa22の状態に合わせてデフォルト値を適用
+                    apply_defaults_to_file(i, detector_type, is_na22)
+                    
+                    if is_na22:
+                        document.getElementById(f"peak2-params-{i+1}").style.display = "block"
+                    else:
+                        document.getElementById(f"peak2-params-{i+1}").style.display = "none"
+                else:
+                    document.getElementById(row_id).style.display = "none"
+
+            draw_selection_graphs()
+            draw_analysis_graph()
+            hide_loading()
+    </script>
+
+</body>
+</html>
